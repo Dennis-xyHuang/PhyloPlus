@@ -39,7 +39,7 @@ combined_df = combined_df.rename(columns = {"# assembly_accession": "Accession",
 combined_df =  combined_df.astype({"Accession": "str", "taxID": "str"})
 del assembly_gb, assembly_rs, assembly_gb_filtered, assembly_rs_filtered
 gc.collect()
-combined_df.to_pickle(assembly_to_taxID_out_path)
+combined_df.to_pickle(assembly_to_taxID_out_path, protocol = 4)
 print("File output completed!")
 
 
@@ -90,5 +90,5 @@ temp_cond_merged = dump_merged["previous"].isin(comp_summary["taxID"])
 temp_ind_main = comp_summary.index[temp_cond_main]
 temp_ind_merged = dump_merged.index[temp_cond_merged]
 comp_summary.loc[temp_ind_main, "CurrentID"] = dump_merged.loc[temp_ind_merged, "current"]
-comp_summary.to_pickle(taxid_to_lineage_out_path)
+comp_summary.to_pickle(taxid_to_lineage_out_path, protocol = 4)
 print("File output completed!")
