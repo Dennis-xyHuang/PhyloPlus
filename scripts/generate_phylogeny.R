@@ -93,7 +93,7 @@ determine_target_node_tips <- function(ref_phylo_paramlist, taxrank_taxid_list, 
         pull(.data[["node"]])
     node <- ifelse(length(nodes_vector) > 1,
                    ape::getMRCA(ref_phylo, nodes_vector),
-                   tidytree::MRCA(ref_phylo,nodes_vector))
+                   tidytree::MRCA(ref_phylo, nodes_vector))
     output_list[["node"]] <- node
     output_list[["tips"]] <- reference_tips_vector
     return(output_list)
@@ -284,7 +284,7 @@ detect_outliers_main <- function(ref_phylo_paramlist, taxrank_taxid_list, node_t
     #
     # @returns: a vector of outlier tip labels.
 
-    outlier_names <- c("NAs", "two refs", "species", "species group", "genus and above")
+    outlier_names <- c("NAs", "two refs", "species", "species group", "genus and above", "kmeans")
     outliers_list <- list()
     outliers_list[outlier_names] <- list(NULL)
 
@@ -307,10 +307,12 @@ detect_outliers_main <- function(ref_phylo_paramlist, taxrank_taxid_list, node_t
     tip_label_vector <- node_tip_list[["tips"]]
     subtree <- insertion_stats_list[["subtree"]]
     dist_matrix <- insertion_stats_list[["matrix"]]
+    
+    n_ref_pool <- length(tip_label_vector)
 
-    if (length(tip_label_vector) == 1) {
+    if (n_ref_pool == 1) {
         invisible() # do nothing if there's only one reference tip
-    } else if (length(tip_label_vector) == 2) {
+    } else if (n_ref_pool == 2) {
         temp_node_vector_original <- change_label_to_node(ref_phylo, tip_label_vector)
         val_subtree <- max(castor::get_all_distances_to_root(subtree))
         val_parent_tree <- max(castor::get_all_distances_to_root(ref_phylo)[temp_node_vector_original])
@@ -333,6 +335,50 @@ detect_outliers_main <- function(ref_phylo_paramlist, taxrank_taxid_list, node_t
                 outliers_list[["genus and above"]] <- c(outliers_list[["genus and above"]], name)
             }
         }
+        tip_label_vector <- setdiff(tip_label_vector, unlist(outliers_list))
+        n_ref_pool <- length(tip_label_vector)
+        rank_columns <- setNames(c("TaxSpecies", "TaxSpeciesGroup", "TaxGenus", "TaxFamily", "TaxOrder", "TaxClass",
+                                   "TaxPhylum", "TaxSuperKingdom"),
+                                 c("species", "species group", "genus", "family", "order", "class", "phylum", 
+                                   "superkingdom"))
+        k_means_threshold <- min(0.2 * n_ref_pool, mean(ref_phylo_paramlist$complete_lineage %>% 
+                                                            dplyr::group_by(get(rank_columns[[tax_rank]])) %>% 
+                                                            dplyr::summarize(n_tips = n_distinct(TipOnPhylo)) %>% 
+                                                            dplyr::pull(n_tips)))
+        if (tax_rank %in% c("species", "species group")) {
+            k_means_val <- min(2, ceiling(n_ref_pool / 10))
+        } else {
+            k_means_val <- min(ifelse(tax_rank %in% c("genus", "family"), 5, 10), ceiling(n_ref_pool / 10))
+        }
+        for (n_cluster in seq(k_means_val, 1, -1)) {
+            if (n_cluster == 1) {
+                qualified_tip_labels <- tip_label_vector
+                break
+            }
+            set.seed(as.numeric(Sys.time()))
+            subtree_clusters <- kmeans(dist_df, n_cluster, nstart = 5)
+            clusters_pool <- which(subtree_clusters$size > k_means_threshold)
+            if (length(clusters_pool) == 0) {
+                next
+            } else {
+                cluster_number <- ifelse(length(clusters_pool) == 1, clusters_pool, sample(clusters_pool, 1))
+                cluster_members <- names(subtree_clusters$cluster[subtree_clusters$cluster == cluster_number])
+                temp_dist_df <- as.data.frame(dist_matrix)[cluster_members, cluster_members]
+                center_tip <- names(which.min(apply(temp_dist_df, 1, median)))
+                parent_node <- change_label_to_node(ref_phylo, center_tip)
+                n_children <- 0
+                while (n_children < k_means_threshold) {
+                    parent_node <- phytools::getParent(ref_phylo, parent_node)
+                    subtree_tips <- phytools::getDescendants(ref_phylo, parent_node)
+                    qualified_tip_labels <- intersect(change_label_to_node(ref_phylo, tip_label_vector), subtree_tips)
+                    qualified_tip_labels <- tibble::as_tibble(ref_phylo) %>% 
+                        dplyr::filter(node %in% qualified_tip_labels) %>% pull(label)
+                    n_children <- length(qualified_tip_labels)
+                }
+                break
+            }
+        }
+        outliers_list[["kmeans"]] <- setdiff(tip_label_vector, qualified_tip_labels)
     }
     return(outliers_list)
 }
@@ -507,5 +553,5 @@ if (nrow(output_summary_table) == 0) {
     write.tree(taxids_tree, file = taxids_tree_path)
 }
 cat(note_str, file = output_note_path, append = TRUE)
-write.table(output_summary_table, file = summary_file_path, sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(output_summary_table, file = summary_file_path, sep = ",", quote = FALSE, row.names = FALSE)
 cat("Done!\n")
