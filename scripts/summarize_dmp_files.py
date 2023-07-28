@@ -17,11 +17,14 @@ assembly_output_path = os.path.join(NCBI_dmp_dir_path, "assembly_summary.csv")
 NCBI_assembly_dataframes = []
 for assembly_report_name, assembly_report_path in NCBI_assembly_reports_path.items():
     temp_assembly_df = pd.read_csv(assembly_report_path, sep="\t", skiprows=[0], low_memory=False)
-    temp_assembly_df = temp_assembly_df[["# assembly_accession", "species_taxid"]]
+    subset_colnames = []
+    subset_colnames.append(next(filter(lambda x: 'assembly_accession' in x, temp_assembly_df.columns)))
+    subset_colnames.append(next(filter(lambda x: 'species_taxid' in x, temp_assembly_df.columns)))
+    temp_assembly_df = temp_assembly_df[subset_colnames]
     NCBI_assembly_dataframes.append(temp_assembly_df)
 final_assembly_df = pd.concat(NCBI_assembly_dataframes)
 final_assembly_df = final_assembly_df.dropna(axis=0, how="any").reset_index(drop=True)
-final_assembly_df = final_assembly_df.rename(columns={"# assembly_accession": "Accession", "species_taxid": "TaxID"})
+final_assembly_df = final_assembly_df.rename(columns={subset_colnames[0]: "Accession", subset_colnames[1]: "TaxID"})
 final_assembly_df.to_csv(assembly_output_path, header=True, index=False)
 print("Assembly summary file output completed!")
 
